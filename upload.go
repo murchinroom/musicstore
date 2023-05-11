@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"os"
@@ -37,34 +38,19 @@ type UploadTrackResponse struct {
 // and the music file will be saved to the disk.
 func UploadTrack(c *gin.Context) {
 	// bind file: https://github.com/gin-gonic/examples/blob/master/file-binding/main.go
-	var req UploadTrackRequest
-	if err := c.ShouldBind(&req); err != nil {
+	req := new(UploadTrackRequest)
+	if err := c.ShouldBind(req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	if req.File == nil && req.AudioFileURL == "" {
-		c.JSON(400, gin.H{"error": "Neither File nor AudioFileURL is provided"})
-		return
-	}
-
-	if req.Name == "" && req.File != nil {
-		req.Name = strings.TrimSuffix(filepath.Base(req.File.Filename), filepath.Ext(req.Name))
-	}
-	if req.Name == "" {
-		c.JSON(400, gin.H{"error": "track name is empty"})
-		return
-	}
-
-	// check if the track already exists
-	if trackExists(c, &req.Track) {
-		c.JSON(400, gin.H{"error": "track already exists"})
+	if err := checkUploadRequest(c, req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
 	// save the metadata
-	err := service.Create(c, &req.Track, service.IfNotExist())
-	if err != nil {
+	if err := saveMetadata(c, req); err != nil {
 		c.JSON(422, gin.H{"error": err.Error()})
 		return
 	}
@@ -74,26 +60,52 @@ func UploadTrack(c *gin.Context) {
 		panic("track ID is 0. this should not happen.")
 	}
 
+	// if no file provided: just save the metadata
 	if req.File == nil {
-		// no file provided, just save the metadata
 		c.JSON(200, UploadTrackResponse{Track: req.Track})
 		return
 	}
-
-	// metadata saved, now save the file
-	file := req.File
-	dst := TrackFilepath(req.Track.ID)
-	c.SaveUploadedFile(file, dst)
-
-	// update the AudioFileURL field
-	req.Track.AudioFileURL = AudioFileURL(req.Track.ID)
-	_, err = service.Update(c, &req.Track)
-	if err != nil {
+	// else: metadata saved, now save the file
+	if err := saveFile(c, req); err != nil {
 		c.JSON(422, gin.H{"error": err.Error()})
 		return
 	}
 
+	// update the AudioFileURL field
+	if err := updateAudioFileURL(c, &req.Track); err != nil {
+		c.JSON(422, gin.H{"error": err.Error()})
+		return
+	}
+
+	// TODO: uncomment this
+	// analyze the emotion
+	// if err := analyzeAndUpdateEmotion(c, &req.Track); err != nil {
+	// 	c.JSON(422, gin.H{"error": err.Error()})
+	// 	return
+	// }
+
 	c.JSON(200, UploadTrackResponse{Track: req.Track})
+}
+
+// success returns true
+func checkUploadRequest(c *gin.Context, req *UploadTrackRequest) error {
+	if req.File == nil && req.AudioFileURL == "" {
+		return errors.New("neither File nor AudioFileURL is provided")
+	}
+
+	if req.Name == "" && req.File != nil {
+		req.Name = strings.TrimSuffix(filepath.Base(req.File.Filename), filepath.Ext(req.Name))
+	}
+	if req.Name == "" {
+		return errors.New("track name is empty")
+	}
+
+	// check if the track already exists
+	if trackExists(c, &req.Track) {
+		return errors.New("track already exists")
+	}
+
+	return nil
 }
 
 func trackExists(ctx context.Context, track *Track) bool {
@@ -111,6 +123,30 @@ func trackExists(ctx context.Context, track *Track) bool {
 	}
 
 	return cnt > 0
+}
+
+func saveMetadata(c *gin.Context, req *UploadTrackRequest) error {
+	err := service.Create(c, &req.Track, service.IfNotExist())
+	return err
+}
+
+func saveFile(c *gin.Context, req *UploadTrackRequest) error {
+	file := req.File
+	dst := TrackFilepath(req.Track.ID)
+	err := c.SaveUploadedFile(file, dst)
+	return err
+}
+
+// requires: track.ID != 0
+func updateAudioFileURL(ctx context.Context, track *Track) error {
+	track.AudioFileURL = AudioFileURL(track.ID)
+	_, err := service.Update(ctx, track)
+	return err
+}
+
+// TODO: implement me
+func analyzeAndUpdateEmotion(ctx context.Context, track *Track) error {
+	return errors.New("not implemented")
 }
 
 // TrackFilepath returns the filepath of the music file of the track:
