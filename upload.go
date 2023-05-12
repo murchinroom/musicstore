@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,29 +61,30 @@ func UploadTrack(c *gin.Context) {
 		panic("track ID is 0. this should not happen.")
 	}
 
-	// if no file provided: just save the metadata
-	if req.File == nil {
-		c.JSON(200, UploadTrackResponse{Track: req.Track})
-		return
-	}
-	// else: metadata saved, now save the file
-	if err := saveFile(c, req); err != nil {
-		c.JSON(422, gin.H{"error": err.Error()})
-		return
+	// metadata saved, now save the file (if any)
+	if req.File != nil {
+		if err := saveFile(c, req); err != nil {
+			service.Delete(c, &req.Track) // rollback
+			c.JSON(422, gin.H{"error": err.Error()})
+			return
+		}
+
+		// update the AudioFileURL field
+		if err := updateAudioFileURL(c, &req.Track); err != nil {
+			service.Delete(c, &req.Track) // rollback
+			c.JSON(422, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
-	// update the AudioFileURL field
-	if err := updateAudioFileURL(c, &req.Track); err != nil {
-		c.JSON(422, gin.H{"error": err.Error()})
-		return
-	}
-
-	// TODO: uncomment this
 	// analyze the emotion
-	// if err := analyzeAndUpdateEmotion(c, &req.Track); err != nil {
-	// 	c.JSON(422, gin.H{"error": err.Error()})
-	// 	return
-	// }
+	if err := analyzeAndUpdateEmotion(c, &req.Track); err != nil {
+		os.Remove(TrackFilepath(req.Track.ID))
+		service.Delete(c, &req.Track)
+
+		c.JSON(422, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(200, UploadTrackResponse{Track: req.Track})
 }
@@ -139,14 +141,34 @@ func saveFile(c *gin.Context, req *UploadTrackRequest) error {
 
 // requires: track.ID != 0
 func updateAudioFileURL(ctx context.Context, track *Track) error {
-	track.AudioFileURL = AudioFileURL(track.ID)
+	track.AudioFileURL = AudioFileUrlRelevant(track.ID)
 	_, err := service.Update(ctx, track)
 	return err
 }
 
-// TODO: implement me
+// requires: track.AudioFileURL != ""
 func analyzeAndUpdateEmotion(ctx context.Context, track *Track) error {
-	return errors.New("not implemented")
+	mp3URL := track.AudioFileURL
+	if mp3URL == "" {
+		return errors.New("empty track.AudioFileURL")
+	}
+	if strings.HasPrefix(mp3URL, "/") {
+		mp3URL = AudioFileUrlAbsolute(track.ID)
+	}
+
+	// call emomusic
+
+	emotion, err := AnalyzeURI(mp3URL)
+	if err != nil {
+		return err
+	}
+
+	// update db
+
+	track.Emotion = emotion
+	_, err = service.Update(ctx, track)
+
+	return err
 }
 
 // TrackFilepath returns the filepath of the music file of the track:
@@ -157,6 +179,28 @@ func analyzeAndUpdateEmotion(ctx context.Context, track *Track) error {
 // and defaults to the current directory (./).
 func TrackFilepath(trackID uint) string {
 	return filepath.Join(AudioFileDir(), AudioFileName(trackID))
+}
+
+// TrackFileUrlAbsolute returns the url of the music file of the track:
+//
+//	{MUSICSTORE_BASEURL}/audio/{trackID}.mp3
+//
+// where {MUSICSTORE_BASEURL} is an environment variable,
+// and defaults to "".
+func AudioFileUrlAbsolute(trackID uint) string {
+	u, err := url.JoinPath(AudioBaseURL(), AudioFileName(trackID))
+	if err != nil {
+		// never happen
+		u = filepath.Join(AudioBaseURL(), AudioFileName(trackID))
+	}
+	return u
+}
+
+// AudioFileUrlRelevant returns the url of the music file of tthe track:
+//
+//	/audio/{trackID}.mp3
+func AudioFileUrlRelevant(trackID uint) string {
+	return AudioStaticServePath + "/" + AudioFileName(trackID)
 }
 
 const AudioDirname = "audio"
@@ -176,14 +220,19 @@ func AudioFileDir() string {
 	return filepath.Join(base, AudioDirname)
 }
 
+func AudioBaseURL() string {
+	base := os.Getenv("MUSICSTORE_BASEURL")
+	u, err := url.JoinPath(base, AudioStaticServePath)
+	if err != nil {
+		return AudioStaticServePath
+	}
+	return u
+}
+
 // AudioFileName returns "{trackID}.mp3".
 //
 // It's used to construct the AudioFileURL field of the Track model.
 // And it's also used to construct the filepath of the music file of the track.
 func AudioFileName(trackID uint) string {
 	return fmt.Sprintf("%d.mp3", trackID)
-}
-
-func AudioFileURL(trackID uint) string {
-	return AudioStaticServePath + "/" + AudioFileName(trackID)
 }

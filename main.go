@@ -4,7 +4,7 @@ import (
 	"github.com/cdfmlr/crud/orm"
 )
 
-func main() {	
+func main() {
 	orm.ConnectDB(orm.DBDriverSqlite, "musicstore.db")
 	orm.RegisterModel(&Track{})
 
