@@ -8,6 +8,7 @@ import (
 	"musicstore/model"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/cdfmlr/crud/log"
@@ -15,31 +16,52 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const EnvEmomusicOnPostNew = "EMOMUSIC_ON_POST_NEW"
+
+// EmomusicOnPostNew == true: do emotion analyze for new track from POST /new.
+//
+// set by env EMOMUSIC_ON_POST_NEW
+var EmomusicOnPostNew bool = true
+
+func init() {
+	if e, ok := os.LookupEnv("EMOMUSIC_ON_POST_NEW"); ok {
+		if b, err := strconv.ParseBool(e); err == nil {
+			EmomusicOnPostNew = b
+		}
+	}
+}
+
 // this file implement a controller for uploading & storing music files.
 
-type UploadTrackRequest struct {
+type PostNewTrackRequest struct {
 	model.Track
 	File *multipart.FileHeader
 }
 
-// UploadTrackResponse when uploading successful:
-type UploadTrackResponse struct {
+// PostNewTrackResponse when uploading successful:
+type PostNewTrackResponse struct {
 	Track model.Track
 }
 
-// UploadTrack handles: POST /tracks/upload
+// PostNewTrack handles: POST /new
 //
 // Body: multipart/form-data
-//   - File: the music file
+//
 //   - Name: the name of the track
 //   - Artist: the artists of the track
 //   - Album: the albums of the track
+//   - CoverImageURL: track'scover image
+//
+// and one of:
+//
+//   - File: curl -F 'File=@audio.mp3'
+//   - AudioFileURL: curl -F 'AudioFileURL=https://example.com/audio.mp3'
 //
 // The metadata of the track will be saved to the database,
 // and the music file will be saved to the disk.
-func UploadTrack(c *gin.Context) {
+func PostNewTrack(c *gin.Context) {
 	// bind file: https://github.com/gin-gonic/examples/blob/master/file-binding/main.go
-	req := new(UploadTrackRequest)
+	req := new(PostNewTrackRequest)
 	if err := c.ShouldBind(req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
@@ -78,19 +100,21 @@ func UploadTrack(c *gin.Context) {
 	}
 
 	// analyze the emotion
-	if err := analyzeAndUpdateEmotion(c, &req.Track); err != nil {
-		_ = os.Remove(req.Track.AudioFilePath())
-		_, _ = service.Delete(c, &req.Track)
+	if EmomusicOnPostNew {
+		if err := analyzeAndUpdateEmotion(c, &req.Track); err != nil {
+			_ = os.Remove(req.Track.AudioFilePath())
+			_, _ = service.Delete(c, &req.Track)
 
-		c.JSON(422, gin.H{"error": err.Error()})
-		return
+			c.JSON(422, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
-	c.JSON(200, UploadTrackResponse{Track: req.Track})
+	c.JSON(200, PostNewTrackResponse{Track: req.Track})
 }
 
 // success returns true
-func checkUploadRequest(c *gin.Context, req *UploadTrackRequest) error {
+func checkUploadRequest(c *gin.Context, req *PostNewTrackRequest) error {
 	if req.File == nil && req.AudioFileURL == "" {
 		return errors.New("neither File nor AudioFileURL is provided")
 	}
@@ -127,12 +151,12 @@ func trackExists(ctx context.Context, track *model.Track) bool {
 	return cnt > 0
 }
 
-func saveMetadata(c *gin.Context, req *UploadTrackRequest) error {
+func saveMetadata(c *gin.Context, req *PostNewTrackRequest) error {
 	err := service.Create(c, &req.Track, service.IfNotExist())
 	return err
 }
 
-func saveFile(c *gin.Context, req *UploadTrackRequest) error {
+func saveFile(c *gin.Context, req *PostNewTrackRequest) error {
 	file := req.File
 	dst := req.Track.AudioFilePath()
 	err := c.SaveUploadedFile(file, dst)

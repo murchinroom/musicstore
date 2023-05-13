@@ -14,7 +14,7 @@ func MakeRouter() *gin.Engine {
 	router.Crud[model.Track](r, "/tracks")
 
 	// upload track: new metadata & file
-	r.POST("/new", UploadTrack)
+	r.POST("/new", PostNewTrack)
 
 	// static audio file
 	r.Static(model.AudioStaticServePath, model.AudioFileDir())
