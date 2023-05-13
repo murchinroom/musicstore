@@ -1,13 +1,13 @@
-package main
+package emomusic
 
 import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"mime/multipart"
+	"musicstore/model"
 	"net/http"
 	"net/url"
 	"os"
@@ -43,37 +43,37 @@ func emomusicPredicturiURL() string {
 
 }
 
-func AnalyzeEmotion(mp3Filepath string) (Emotion, error) {
+func AnalyzeEmotion(mp3Filepath string) (model.Emotion, error) {
 	// build body
 	form, err := predictmp3RequestForm(mp3Filepath)
 	if err != nil {
-		return Emotion{}, err
+		return model.Emotion{}, err
 	}
 
 	// build request
 	client := &http.Client{}
 	req, err := predictmp3Request(form)
 	if err != nil {
-		return Emotion{}, err
+		return model.Emotion{}, err
 	}
 
 	// send request
 	resp, err := client.Do(req)
 	if err != nil {
-		return Emotion{}, err
+		return model.Emotion{}, err
 	}
 	defer resp.Body.Close()
 
 	// check response
 	if resp.StatusCode != http.StatusOK {
-		return Emotion{}, errors.New("emomusic API error")
+		return model.Emotion{}, errors.New("emomusic API error")
 	}
 
 	// parse response
-	var emotion Emotion
+	var emotion model.Emotion
 	err = json.NewDecoder(resp.Body).Decode(&emotion)
 	if err != nil {
-		return Emotion{}, err
+		return model.Emotion{}, err
 	}
 
 	return emotion, nil
@@ -118,36 +118,34 @@ func predictmp3Request(form *bytes.Buffer) (*http.Request, error) {
 }
 
 // GET {EMOMUSIC_SERVER}/predicturi?mp3={urlToMp3}
-func AnalyzeURI(urlToMp3 string) (Emotion, error) {
+func AnalyzeURI(urlToMp3 string) (model.Emotion, error) {
 	// build query
 	fullUrl, err := url.Parse(emomusicPredicturiURL())
 	if err != nil {
-		return Emotion{}, err
+		return model.Emotion{}, err
 	}
 
 	params := fullUrl.Query()
 	params.Add("mp3", urlToMp3)
 	fullUrl.RawQuery = params.Encode()
 
-	fmt.Printf("[DBG] AnalyzeURI: fullUrl=%s\n", fullUrl.String())
-
 	// send http request
 	resp, err := http.Get(fullUrl.String())
 	if err != nil {
-		return Emotion{}, err
+		return model.Emotion{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := ioutil.ReadAll(resp.Body)
-		return Emotion{}, errors.New("failed to call emomusic: status != 200: " + string(body))
+		return model.Emotion{}, errors.New("failed to call emomusic: status != 200: " + string(body))
 	}
 
 	// parse response
-	var emotion Emotion
+	var emotion model.Emotion
 	err = json.NewDecoder(resp.Body).Decode(&emotion)
 	if err != nil {
-		return Emotion{}, err
+		return model.Emotion{}, err
 	}
 
 	return emotion, nil
