@@ -19,5 +19,8 @@ func MakeRouter() *gin.Engine {
 	// static audio file
 	r.Static(model.AudioStaticServePath, model.AudioFileDir())
 
+	// murecom
+	r.GET("/murecom", GetMurecom)
+
 	return r
 }
