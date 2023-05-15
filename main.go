@@ -1,29 +1,132 @@
 package main
 
 import (
-	"musicstore/model"
+	"context"
+	"flag"
+	"musicstore/audiofilestore"
+	"musicstore/metadata"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/cdfmlr/crud/config"
 	"github.com/cdfmlr/crud/log"
-	"github.com/cdfmlr/crud/orm"
-	"github.com/glebarez/sqlite" // pure go sqlite driver: supports math functions
-	"gorm.io/gorm"
+	"github.com/cdfmlr/crud/router"
+	"github.com/gin-gonic/gin"
+)
+
+var logger = log.ZoneLogger("musicstore")
+
+var (
+	configFile = flag.String("config", "config.yaml", "config file path")
+	dryRun     = flag.Bool("dry-run", false, "print config and exit")
 )
 
 func main() {
-	// orm.ConnectDB(orm.DBDriverSqlite, "musicstore.db")
-	connectDB("musicstore.db")
-
-	orm.RegisterModel(&model.Track{})
-
-	r := MakeRouter()
-	r.Run(":8086")
+	flag.Parse()
+	cfg := loadConfig(*configFile)
+	srv := startServices(cfg)
+	gracefulShoutdown(srv)
 }
 
-// TODO: crud should support custom driver
-func connectDB(dsn string) error {
-	var err error
-	orm.DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger: log.Logger4Gorm,
-	})
-	return err
+func loadConfig(configFile string) *MusicstoreConfig {
+	var cfg MusicstoreConfig
+	config.Init(&cfg, config.FromFile(configFile))
+
+	logger.Info("config loaded.")
+	cfg.Write(os.Stdout)
+
+	if *dryRun {
+		os.Exit(0)
+	}
+
+	return &cfg
+}
+
+func startServices(cfg *MusicstoreConfig) *http.Server {
+	logger.Info("starting musicstore...")
+
+	r := router.NewRouter()
+
+	// so, the odd thing here is that, we ListenAndServe first,
+	// and then register routes (by metadata.Start & startAudioFileStore).
+	//
+	// this is because, to LoadFromDir (a.k.a. AddTracksFromDir) in
+	// startAudioFileStore(), we need expose the uri to audio files,
+	// so that emomusic can download and analyze them.
+	srv := startHttpServer(cfg.HttpListenAddr, r)
+
+	if cfg.Emomusic.Server != "" {
+		os.Setenv("EMOMUSIC_SERVER", cfg.Emomusic.Server)
+	}
+
+	metadata.Start(cfg.Metadata.DB, r)
+
+	for _, afsCfg := range cfg.AudioFileStores {
+		if err := startAudioFileStore(afsCfg, r); err != nil {
+			logger.Fatalf("startAudioFileStore failed: %v", err)
+		}
+	}
+
+	return srv
+}
+
+func startHttpServer(addr string, r http.Handler) *http.Server {
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: r,
+	}
+
+	go func() {
+		// service connections
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf("listen: %s\n", err)
+		}
+	}()
+
+	logger.Infof("server started at %s", addr)
+
+	return srv
+}
+
+func startAudioFileStore(afsCfg AudioFileStoreConfig, r gin.IRouter) error {
+	afs := audiofilestore.NewAudioFileStore(
+		afsCfg.Name, afsCfg.FileDir, afsCfg.BaseUrl, afsCfg.EnableEmomusic, r)
+
+	if afsCfg.LoadFromDir {
+		if err := afs.AddTracksFromDir(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func gracefulShoutdown(srv *http.Server) {
+	// https://gin-gonic.com/docs/examples/graceful-restart-or-stop/
+
+	// Wait for interrupt signal to gracefully shutdown the server with
+	// a timeout of 5 seconds.
+	quit := make(chan os.Signal, 1)
+	// kill (no param) default send syscanll.SIGTERM
+	// kill -2 is syscall.SIGINT
+	// kill -9 is syscall.SIGKILL but can't be catch, so don't need add it
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	<-quit
+	logger.Println("Shutdown Server ...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Fatal("Server Shutdown:", err)
+	}
+	// catching ctx.Done(). timeout of 200 ms.
+	select {
+	case <-ctx.Done():
+		logger.Println("timeout of 200 ms.")
+	}
+	logger.Println("Server exiting")
 }

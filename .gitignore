@@ -1,6 +1,8 @@
 song.mp3
-musicstore.db
+musicstore*.db
 audio/
+bgm/
+config.yaml
 
 ### https://github.com/github/gitignore/blob/main/Global/macOS.gitignore
 # General

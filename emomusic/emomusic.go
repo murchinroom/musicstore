@@ -3,9 +3,8 @@ package emomusic
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
-	"io/ioutil"
 	"mime/multipart"
 	"musicstore/model"
 	"net/http"
@@ -43,7 +42,10 @@ func emomusicPredicturiURL() string {
 
 }
 
-func AnalyzeEmotion(mp3Filepath string) (model.Emotion, error) {
+// DO NOT USE THIS FUNCTION. IT'S BUGGY.
+// 
+// FIXME: 422 Unprocessable Entity
+func AnalyzeFile(mp3Filepath string) (model.Emotion, error) {
 	// build body
 	form, err := predictmp3RequestForm(mp3Filepath)
 	if err != nil {
@@ -66,7 +68,8 @@ func AnalyzeEmotion(mp3Filepath string) (model.Emotion, error) {
 
 	// check response
 	if resp.StatusCode != http.StatusOK {
-		return model.Emotion{}, errors.New("emomusic API error")
+		body, _ := io.ReadAll(resp.Body)
+		return model.Emotion{}, fmt.Errorf("failed to call emomusic: status (%v) != 200: %s", resp.StatusCode, string(body))
 	}
 
 	// parse response
@@ -85,7 +88,7 @@ func predictmp3RequestForm(mp3Filepath string) (*bytes.Buffer, error) {
 
 	writer := multipart.NewWriter(form)
 
-	fw, err := writer.CreateFormFile("file.name", mp3Filepath)
+	fw, err := writer.CreateFormFile("file", mp3Filepath)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +115,7 @@ func predictmp3Request(form *bytes.Buffer) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "multipart/form-data")
+	// req.Header.Set("Content-Type", "multipart/form-data")
 
 	return req, nil
 }
@@ -137,8 +140,8 @@ func AnalyzeURI(urlToMp3 string) (model.Emotion, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
-		return model.Emotion{}, errors.New("failed to call emomusic: status != 200: " + string(body))
+		body, _ := io.ReadAll(resp.Body)
+		return model.Emotion{}, fmt.Errorf("failed to call emomusic: status (%v) != 200: %s", resp.StatusCode, string(body))
 	}
 
 	// parse response

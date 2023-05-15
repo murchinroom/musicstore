@@ -1,0 +1,17 @@
+HttpListenAddr: 127.0.0.1:8080
+Metadata:
+  DB: ./musicstore.db
+AudioFileStores:
+  - Name: audio
+    FileDir: ./audio
+    # BaseUrl must start with proto://
+    BaseUrl: http://127.0.0.1:8080
+    EnableEmomusic: true
+    LoadFromDir: false
+  - Name: bgm
+    FileDir: ./bgm
+    BaseUrl: http://127.0.0.1:8080
+    EnableEmomusic: true
+    LoadFromDir: true
+Emomusic:
+  Server: http://127.0.0.1:8002

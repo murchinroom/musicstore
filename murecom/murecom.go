@@ -1,4 +1,4 @@
-package main
+package murecom
 
 // this file implement a controller for recommending music by emotion.
 
