@@ -23,6 +23,7 @@ var logger = log.ZoneLogger("musicstore")
 var (
 	configFile = flag.String("config", "config.yaml", "config file path")
 	dryRun     = flag.Bool("dry-run", false, "print config and exit")
+	corsEnable = flag.Bool("cors", false, "enable cors")
 )
 
 func main() {
@@ -50,7 +51,13 @@ func startServices(cfg *MusicstoreConfig) *http.Server {
 	logger.Info("starting musicstore...")
 
 	r := router.NewRouter()
-	corsSetting(r)
+
+	// CORS here is not needed, murecom-gw4reader now proxies audio files requests.
+	// duplicate CORS headers will cause problems.
+	if *corsEnable {
+		logger.Info("CORS is enabled.")
+		r.Use(cors.Default())
+	}
 
 	// so, the odd thing here is that, we ListenAndServe first,
 	// and then register routes (by metadata.Start & startAudioFileStore).
