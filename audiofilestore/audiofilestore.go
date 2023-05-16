@@ -28,7 +28,8 @@ import (
 var logger = log.ZoneLogger("musicstore/audiofilestore")
 
 func init() {
-	logger.Logger.SetLevel(logrus.DebugLevel)
+	// logger.Logger.SetLevel(logrus.DebugLevel)
+	logger.Logger.SetLevel(logrus.InfoLevel)
 }
 
 // AudioFileStore stores audio files in a local directory.

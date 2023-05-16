@@ -14,6 +14,7 @@ import (
 	"github.com/cdfmlr/crud/config"
 	"github.com/cdfmlr/crud/log"
 	"github.com/cdfmlr/crud/router"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -49,6 +50,7 @@ func startServices(cfg *MusicstoreConfig) *http.Server {
 	logger.Info("starting musicstore...")
 
 	r := router.NewRouter()
+	corsSetting(r)
 
 	// so, the odd thing here is that, we ListenAndServe first,
 	// and then register routes (by metadata.Start & startAudioFileStore).
@@ -71,6 +73,17 @@ func startServices(cfg *MusicstoreConfig) *http.Server {
 	}
 
 	return srv
+}
+
+func corsSetting(r *gin.Engine) {
+	r.Use(cors.New(cors.Config{
+		AllowAllOrigins:  true,
+		AllowMethods:     []string{"*"},
+		AllowHeaders:     []string{"*"},
+		ExposeHeaders:    []string{"*"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 }
 
 func startHttpServer(addr string, r http.Handler) *http.Server {
